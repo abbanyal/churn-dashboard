@@ -1,8 +1,21 @@
-import streamlit as st, pandas as pd, joblib
+import streamlit as st
+import pandas as pd
+import joblib
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 st.set_page_config(page_title="Churn Risk Dashboard", layout="wide")
-model = joblib.load("model.joblib")
+
+BASE = Path(__file__).parent
+
+
+@st.cache_resource
+def load_model():
+    return joblib.load(BASE / "model.joblib")
+
+
+model = load_model()
+
 
 def build(d):
     d = d.copy()
@@ -11,6 +24,15 @@ def build(d):
     d["EngagementProduct"] = d["IsActiveMember"] * d["NumOfProducts"]
     d["AgeTenure"] = d["Age"] * d["Tenure"]
     return d
+
+
+def predict(d):
+    return float(model.predict_proba(build(d))[0, 1])
+
+
+def risk_label(p):
+    return "🔴 High" if p > 0.5 else "🟡 Medium" if p > 0.25 else "🟢 Low"
+
 
 st.title("Customer Churn Risk Dashboard")
 tab1, tab2, tab3 = st.tabs(["Risk Calculator", "What-If Simulator", "Model Insights"])
@@ -28,29 +50,56 @@ with st.sidebar:
     active = st.selectbox("Active Member", [1, 0])
     salary = st.number_input("Estimated Salary", 0.0, 250000.0, 100000.0)
 
-base = pd.DataFrame([{"CreditScore": credit, "Geography": geo, "Gender": gender,
-    "Age": age, "Tenure": tenure, "Balance": balance, "NumOfProducts": products,
+base = pd.DataFrame([{
+    "CreditScore": credit, "Geography": geo, "Gender": gender, "Age": age,
+    "Tenure": tenure, "Balance": balance, "NumOfProducts": products,
     "HasCrCard": card, "IsActiveMember": active, "EstimatedSalary": salary}])
-
-def predict(d): return model.predict_proba(build(d))[0, 1]
+p = predict(base)
 
 with tab1:
-    p = predict(base)
+    st.subheader("Churn Risk Calculator")
     st.metric("Churn Probability", f"{p:.1%}")
-    st.write("Risk level:", "🔴 High" if p > 0.5 else "🟡 Medium" if p > 0.25 else "🟢 Low")
-    st.progress(float(p))
+    st.write("Risk level:", risk_label(p))
+    st.progress(min(max(p, 0.0), 1.0))
 
 with tab2:
+    st.subheader("What-If Scenario Simulator")
     st.write("Change engagement/product values and watch the probability move.")
     new_prod = st.slider("Products (scenario)", 1, 4, products, key="np")
     new_act = st.selectbox("Active (scenario)", [1, 0], index=[1, 0].index(active), key="na")
-    scen = base.copy(); scen["NumOfProducts"] = new_prod; scen["IsActiveMember"] = new_act
+    scen = base.copy()
+    scen["NumOfProducts"] = new_prod
+    scen["IsActiveMember"] = new_act
     p2 = predict(scen)
     c1, c2 = st.columns(2)
     c1.metric("Current", f"{p:.1%}")
-    c2.metric("Scenario", f"{p2:.1%}", f"{(p2-p):+.1%}", delta_color="inverse")
+    c2.metric("Scenario", f"{p2:.1%}", f"{(p2 - p):+.1%}", delta_color="inverse")
 
 with tab3:
-    names = model.named_steps["prep"].get_feature_names_out()
-    imp = pd.Series(model.named_steps["model"].feature_importances_, index=names).sort_values().tail(12)
-    fig, ax = plt.subplots(); imp.plot(kind="barh", ax=ax); st.pyplot(fig)
+    st.subheader("Feature Importance")
+    try:
+        names = model.named_steps["prep"].get_feature_names_out()
+        names = [n.split("__", 1)[-1] for n in names]
+        imp = pd.Series(model.named_steps["model"].feature_importances_, index=names)
+        imp = imp.sort_values().tail(12)
+        fig, ax = plt.subplots(figsize=(8, 5))
+        imp.plot(kind="barh", ax=ax)
+        ax.set_xlabel("Importance")
+        st.pyplot(fig)
+        plt.close(fig)
+    except Exception as e:
+        st.error(f"Could not draw feature importance: {e}")
+
+    st.subheader("Distribution of Predicted Churn Probabilities")
+    try:
+        tp = pd.read_csv(BASE / "test_probs.csv")
+        fig2, ax2 = plt.subplots(figsize=(8, 4))
+        ax2.hist(tp[tp["actual"] == 0]["prob"], bins=30, alpha=0.6, label="Stayed")
+        ax2.hist(tp[tp["actual"] == 1]["prob"], bins=30, alpha=0.6, label="Churned")
+        ax2.set_xlabel("Predicted churn probability")
+        ax2.set_ylabel("Customers")
+        ax2.legend()
+        st.pyplot(fig2)
+        plt.close(fig2)
+    except Exception as e:
+        st.error(f"Could not draw probability distribution: {e}")
