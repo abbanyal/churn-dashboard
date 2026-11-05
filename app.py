@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
-import matplotlib.pyplot as plt
+import numpy as np
 from pathlib import Path
 
 st.set_page_config(page_title="Churn Risk Dashboard", layout="wide")
@@ -81,25 +81,20 @@ with tab3:
         names = model.named_steps["prep"].get_feature_names_out()
         names = [n.split("__", 1)[-1] for n in names]
         imp = pd.Series(model.named_steps["model"].feature_importances_, index=names)
-        imp = imp.sort_values().tail(12)
-        fig, ax = plt.subplots(figsize=(8, 5))
-        imp.plot(kind="barh", ax=ax)
-        ax.set_xlabel("Importance")
-        st.pyplot(fig)
-        plt.close(fig)
+        imp = imp.sort_values(ascending=False).head(12)
+        imp_df = imp.rename("Importance").rename_axis("Feature").reset_index()
+        st.bar_chart(imp_df, x="Feature", y="Importance", horizontal=True, sort="-Importance")
     except Exception as e:
         st.error(f"Could not draw feature importance: {e}")
 
     st.subheader("Distribution of Predicted Churn Probabilities")
     try:
         tp = pd.read_csv(BASE / "test_probs.csv")
-        fig2, ax2 = plt.subplots(figsize=(8, 4))
-        ax2.hist(tp[tp["actual"] == 0]["prob"], bins=30, alpha=0.6, label="Stayed")
-        ax2.hist(tp[tp["actual"] == 1]["prob"], bins=30, alpha=0.6, label="Churned")
-        ax2.set_xlabel("Predicted churn probability")
-        ax2.set_ylabel("Customers")
-        ax2.legend()
-        st.pyplot(fig2)
-        plt.close(fig2)
+        edges = np.linspace(0, 1, 21)
+        labels = [f"{edges[i]:.2f}-{edges[i + 1]:.2f}" for i in range(20)]
+        stayed, _ = np.histogram(tp[tp["actual"] == 0]["prob"], bins=edges)
+        churned, _ = np.histogram(tp[tp["actual"] == 1]["prob"], bins=edges)
+        hist = pd.DataFrame({"Stayed": stayed, "Churned": churned}, index=labels)
+        st.bar_chart(hist, x_label="Predicted churn probability", y_label="Customers")
     except Exception as e:
         st.error(f"Could not draw probability distribution: {e}")
