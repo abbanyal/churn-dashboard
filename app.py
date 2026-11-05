@@ -76,6 +76,15 @@ with tab2:
     c2.metric("Scenario", f"{p2:.1%}", f"{(p2 - p):+.1%}", delta_color="inverse")
 
 with tab3:
+        st.subheader("How Age Changes This Customer's Risk")
+    try:
+        ages = list(range(18, 93, 2))
+        curve = pd.concat([base.assign(Age=a) for a in ages], ignore_index=True)
+        probs = model.predict_proba(build(curve))[:, 1]
+        st.line_chart(pd.DataFrame({"Age": ages, "Churn probability": probs}),
+                      x="Age", y="Churn probability")
+    except Exception as e:
+        st.error(f"Could not draw the age curve: {e}")
     st.subheader("Feature Importance")
     try:
         names = model.named_steps["prep"].get_feature_names_out()
